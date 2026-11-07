@@ -2,6 +2,42 @@
 
 Shared Power Bank Circular Inventory Management System, developed with Lovable.
 
+## B0-A development setup
+
+Prerequisites:
+
+- Node.js 24.15 or newer within the 24.x release line (see `.nvmrc`)
+- npm
+- Docker Desktop for local Supabase database tests
+
+Install dependencies and start the static application shell:
+
+```sh
+npm install
+npm run dev
+```
+
+Copy `.env.example` to `.env.local` and supply the project URL and browser-safe anonymous key before code calls `getSupabaseClient()`. The B0-A shell itself does not require a live Supabase project. Never commit real environment values.
+
+Run the TypeScript verification commands:
+
+```sh
+npm run typecheck
+npm run lint
+npm run test:run
+npm run build
+```
+
+Run the PostgreSQL migration and pgTAP tests with Docker Desktop running:
+
+```sh
+npx supabase start
+npx supabase db reset
+npm run test:db
+```
+
+TypeScript tests do not verify PostgreSQL constraints. If the local Supabase stack is unavailable, report database migration and pgTAP verification as NOT RUN.
+
 ## Repository management
 
 - Keep confirmed requirements and shared design documents under `docs/`.
