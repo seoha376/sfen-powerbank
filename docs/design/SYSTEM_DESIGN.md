@@ -1,6 +1,6 @@
 # SFEN 공통 시스템 설계
 
-이 문서는 B0-A/B/C에서 코드와 Migration에 반영된 공통 기반을 설명한다. 실제 회원가입·승인·로그인 UI, 비밀번호 변경 업무와 B1~B6 업무 Transaction은 아직 구현되지 않았다.
+이 문서는 B0-A/B/C와 B1-A에서 코드와 Migration에 반영된 공통 기반을 설명한다. 실제 회원가입·승인·로그인 UI, 비밀번호 변경 업무와 B1-A를 제외한 B1~B6 업무 Transaction은 아직 구현되지 않았다.
 
 ## 기술 스택
 
@@ -67,10 +67,18 @@ FK 삭제 동작은 `RESTRICT`이며 조회용 인덱스가 포함된다. B0-B M
 - 6개 업무 테이블 모두 RLS를 사용한다.
 - 일반 사용자는 자신의 `app_users` 행과 자신의 `rentals`만 조회할 수 있으며 업무 테이블을 직접 수정할 수 없다.
 - 관리자 여부는 `auth.uid()`와 `app_users.auth_user_id`를 연결한 DB 함수로 검사한다. 역할 판단에 사용자 수정이 가능한 Auth user metadata를 사용하지 않는다.
-- 관리자만 App User, Station, Battery, Rental, History, System Setting을 변경할 수 있다.
+- 관리자만 App User, Station, Battery, Rental, History, System Setting을 변경할 수 있다. Station 등록·수정은 B1-A부터 직접 테이블 쓰기가 아니라 전용 RPC만 사용한다.
 - Battery 상태 이력은 관리자만 조회한다.
 - `station_inventory` 보안 호출자 View는 Station별 Available 수량과 슬롯 점유 수량만 공개한다. 익명·인증 사용자의 원본 Battery 조회 권한도 재고 계산에 필요한 식별자·Station·상태 열로 제한한다.
 - 모든 `SECURITY DEFINER` 함수는 비공개 `private` Schema에 두고 빈 `search_path`와 명시적 실행 권한을 사용한다.
+
+## B1-A Station 관리
+
+- `admin_create_station`과 `admin_update_station` RPC가 관리자 권한, 필수 입력과 음수가 아닌 `slot_capacity`를 DB에서 검증한다.
+- `station_inventory` View는 Battery에서 `available_count`, `occupied_slot_count`, `remaining_slot_count`를 계산한다. 점유 상태는 `Charging`, `Available`, `UnderRepair`뿐이며 별도 재고 테이블이나 저장 점유량은 없다.
+- 용량 변경은 `private.lock_station_capacity`로 Station 행을 `FOR UPDATE` 잠근 뒤 점유량을 다시 계산하며, 현재 점유량보다 작은 용량을 거부한다.
+- 이후 Battery 등록·반납·재배치 Transaction은 점유량을 늘리기 전에 같은 잠금 함수를 호출해야 한다. 이 규칙을 따르지 않는 직접 Station `INSERT`/`UPDATE`는 인증 사용자에게 허용하지 않는다.
+- 관리 화면은 현재 Supabase Auth 세션과 연결된 `app_users` 관리자 프로필을 확인하지만, 최종 권한 판단은 RPC의 DB 관리자 검사에서 수행한다.
 
 ## 재학증명서 Storage
 
@@ -103,7 +111,7 @@ FK 삭제 동작은 `RESTRICT`이며 조회용 인덱스가 포함된다. B0-B M
 
 | 블록 | 원자적 처리 기준 |
 | --- | --- |
-| B1 | 관리자 권한 확인, Battery/Station 잠금, 등록 또는 재배치, 수용량 검사, History 기록 |
+| B1 | B1-A Station 등록·수정은 구현됨. Battery 등록·재배치는 관리자 권한 확인, Battery/Station 잠금, 수용량 검사, History 기록 계약만 정의됨. |
 | B3 | 사용자 자격·정지·활성 대여 검사, User/Battery 잠금, Rental 생성, `Available -> Rented`, History 기록 |
 | B4 | Rental/Battery/Station 잠금, 미반납·수용량 검사, 반납 필드와 `used_count`, `Charging` 전이·충전 Clock, History 기록 |
 | B5/B6 | Battery와 관련 Rental 잠금, 공통 상태 전이·확률 Gate 검사, 충전·수리·연체·분실·폐기 필드와 History 기록 |
@@ -118,6 +126,7 @@ FK 삭제 동작은 `RESTRICT`이며 조회용 인덱스가 포함된다. B0-B M
 ## 이후 확장 범위
 
 - B2: 실제 회원가입·승인·로그인 UI와 비밀번호 변경 업무
-- B1~B6: 위 계약에 따른 실제 업무 RPC와 화면
+- B1: Battery 등록·재배치 RPC와 화면
+- B3~B6: 위 계약에 따른 실제 업무 RPC와 화면
 
 확장 시 기존 Schema, 상태 전이, 공통 API 계약을 변경하려면 관련 코드·테스트·이 문서를 함께 갱신한다.
