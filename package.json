@@ -14,6 +14,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:db": "supabase test db",
+    "auth:init-admin": "node scripts/initialize-admin.ts",
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
