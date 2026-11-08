@@ -1,6 +1,6 @@
 # SFEN 공통 시스템 설계
 
-이 문서는 B0-A/B에서 코드와 Migration에 반영된 공통 기반을 설명한다. 실제 회원가입·승인·로그인 UI, 비밀번호 변경 업무, 대여·반납 Transaction과 시뮬레이션은 아직 구현되지 않았다.
+이 문서는 B0-A/B/C에서 코드와 Migration에 반영된 공통 기반을 설명한다. 실제 회원가입·승인·로그인 UI, 비밀번호 변경 업무와 B1~B6 업무 Transaction은 아직 구현되지 않았다.
 
 ## 기술 스택
 
@@ -79,9 +79,45 @@ FK 삭제 동작은 `RESTRICT`이며 조회용 인덱스가 포함된다. B0-B M
 - 객체 경로의 첫 폴더는 Auth 사용자 UUID다.
 - 본인은 자신의 UUID 폴더에 소유한 객체만 접근하고, 관리자는 전체 객체에 접근한다.
 
+## 시간과 충전
+
+- 기본 설정은 대여 7일, 장기 미반납 60일, `time_scale = 1`, 배터리 단가 30,000원이다.
+- Overdue와 장기 미반납은 각각 시뮬레이션 경과시간이 7일과 60일을 **초과**할 때 성립한다.
+- 충전 속도는 시뮬레이션 1분당 10%p이며 DB의 정수 충전량에 맞춰 소수 %p를 내림하고 결과를 0~100%로 제한한다.
+- 시간 함수는 현재 시각을 인자로 받아 Scheduler 없이 호출 시점에 계산한다.
+- 활성 Rental은 `simulation_elapsed_seconds`, `simulation_anchor_at`, `simulation_time_scale`을 저장한다.
+- Charging Battery는 `charge_simulation_elapsed_seconds`, `charge_time_anchor_at`, `charge_time_scale`을 저장한다.
+- `set_simulation_time_scale`은 기존 배율 구간을 누적값에 먼저 반영한 후 새 기준 시각과 배율을 원자적으로 저장한다. 직접 `system_settings.time_scale`을 변경하는 것은 Trigger가 차단한다.
+
+## 확률과 관리자 시연 제어
+
+- 사용 중 고장 5%, 충전 중 고장 3%, 수리 성공 90%, 수리 실패 10%다.
+- 공통 판정 함수는 난수 공급자를 주입할 수 있으며 기본값은 `Math.random`이다.
+- 결과 강제 지정은 관리자, DB의 `demo_mode_enabled`, 서버 환경의 `SFEN_DEMO_MODE_ALLOWED`가 모두 참일 때만 허용한다.
+- `SupabaseDemoControlSource`가 서버용 Supabase Client로 역할과 DB 설정을 조회하고 `resolveTrustedSimulationOutcome`이 세 Gate를 구성한다. 클라이언트가 보낸 역할·시연 활성값을 신뢰하지 않는다.
+- 운영 환경의 서버 Gate 기본값은 false다. 관리자 시연 UI는 B0-C 범위에 없다.
+
+## B1~B6 Transaction 계약
+
+입력·출력 타입과 오류 코드는 `src/contracts/transactions.ts`에 정의한다. 실제 RPC는 각 후속 블록에서 구현한다.
+
+| 블록 | 원자적 처리 기준 |
+| --- | --- |
+| B1 | 관리자 권한 확인, Battery/Station 잠금, 등록 또는 재배치, 수용량 검사, History 기록 |
+| B3 | 사용자 자격·정지·활성 대여 검사, User/Battery 잠금, Rental 생성, `Available -> Rented`, History 기록 |
+| B4 | Rental/Battery/Station 잠금, 미반납·수용량 검사, 반납 필드와 `used_count`, `Charging` 전이·충전 Clock, History 기록 |
+| B5/B6 | Battery와 관련 Rental 잠금, 공통 상태 전이·확률 Gate 검사, 충전·수리·연체·분실·폐기 필드와 History 기록 |
+
+- 관련 행은 안정적인 ID 순서로 `FOR UPDATE` 잠금을 획득한다.
+- 상태 변경과 정확히 한 건의 History 기록은 같은 DB Transaction에서 성공하거나 함께 rollback한다.
+- 수용량과 활성 대여 여부는 잠금 후 다시 검사한다.
+- 여러 Supabase 클라이언트 호출을 업무 Transaction의 대체물로 사용하지 않는다.
+- 확률 결과 입력은 이벤트별 결과를 묶은 판별 Union으로 제한한다.
+- 공통 오류에는 권한, 자격·정지, 미존재, 잘못된 상태 전이, 중복 대여, 수용량 초과, 동시성 충돌과 시연 강제 결과 거부가 포함된다.
+
 ## 이후 확장 범위
 
 - B2: 실제 회원가입·승인·로그인 UI와 비밀번호 변경 업무
-- B0-C 이후 업무 블록: 확정 요구사항에 따른 공통 설계를 이 문서에 추가
+- B1~B6: 위 계약에 따른 실제 업무 RPC와 화면
 
 확장 시 기존 Schema, 상태 전이, 공통 API 계약을 변경하려면 관련 코드·테스트·이 문서를 함께 갱신한다.
