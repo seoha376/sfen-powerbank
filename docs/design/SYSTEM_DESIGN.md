@@ -1,6 +1,6 @@
 # SFEN 공통 시스템 설계
 
-이 문서는 B0-A/B/C에서 코드와 Migration에 반영된 공통 기반을 설명한다. 실제 회원가입·승인·로그인 UI, 비밀번호 변경 업무와 B1~B6 업무 Transaction은 아직 구현되지 않았다.
+이 문서는 B0-A/B/C와 B1-A/B에서 코드와 Migration에 반영된 공통 기반을 설명한다. 실제 회원가입·승인·로그인 UI, 비밀번호 변경 업무와 B2~B6 업무 Transaction은 아직 구현되지 않았다.
 
 ## 기술 스택
 
@@ -42,7 +42,7 @@ FK 삭제 동작은 `RESTRICT`이며 조회용 인덱스가 포함된다. B0-B M
 | `UnderRepair` | `Charging`, `Disposed` |
 | `Disposed` | 없음 |
 
-`Disposed`는 종료 상태다. 같은 상태에서 위치만 바꾸는 재배치는 `Charging`, `Available`, `UnderRepair`에 한해 명시적인 relocation 이벤트로 허용된다. 전이 그래프는 현재 TypeScript 공통 검사 로직에 구현되어 있으며, DB Transaction/RPC로 강제하는 기능은 아직 없다.
+`Disposed`는 종료 상태다. 같은 상태에서 위치만 바꾸는 재배치는 `Charging`, `Available`, `UnderRepair`에 한해 명시적인 relocation 이벤트로 허용된다. 전이 그래프는 TypeScript 공통 검사 로직에 구현되어 있으며, B1-B 재배치 RPC도 같은 세 상태만 허용한다.
 
 ## 공통 재고 규칙
 
@@ -51,7 +51,7 @@ FK 삭제 동작은 `RESTRICT`이며 조회용 인덱스가 포함된다. B0-B M
 - Available 재고 수량은 별도 집계 테이블 없이 `batteries`에서 계산한다.
 - 활성 미반납 Rental은 `return_time IS NULL`이면서 Battery 상태가 `Rented` 또는 `Overdue`인 경우다.
 - 최초 상태 이력은 `from_status = NULL`, `to_status = Charging`이다.
-- 실제 대여·반납·재배치 Transaction은 이후 단계에서 구현한다.
+- 실제 대여·반납 Transaction은 이후 단계에서 구현한다. Battery 재배치 Transaction은 B1-B에서 구현했다.
 
 ## 인증 기반
 
@@ -67,10 +67,27 @@ FK 삭제 동작은 `RESTRICT`이며 조회용 인덱스가 포함된다. B0-B M
 - 6개 업무 테이블 모두 RLS를 사용한다.
 - 일반 사용자는 자신의 `app_users` 행과 자신의 `rentals`만 조회할 수 있으며 업무 테이블을 직접 수정할 수 없다.
 - 관리자 여부는 `auth.uid()`와 `app_users.auth_user_id`를 연결한 DB 함수로 검사한다. 역할 판단에 사용자 수정이 가능한 Auth user metadata를 사용하지 않는다.
-- 관리자만 App User, Station, Battery, Rental, History, System Setting을 변경할 수 있다.
+- 관리자만 App User, Station, Battery, Rental, History, System Setting을 변경할 수 있다. Station 등록·수정은 B1-A부터 직접 테이블 쓰기가 아니라 전용 RPC만 사용한다.
 - Battery 상태 이력은 관리자만 조회한다.
 - `station_inventory` 보안 호출자 View는 Station별 Available 수량과 슬롯 점유 수량만 공개한다. 익명·인증 사용자의 원본 Battery 조회 권한도 재고 계산에 필요한 식별자·Station·상태 열로 제한한다.
 - 모든 `SECURITY DEFINER` 함수는 비공개 `private` Schema에 두고 빈 `search_path`와 명시적 실행 권한을 사용한다.
+
+## B1-A Station 관리
+
+- `admin_create_station`과 `admin_update_station` RPC가 관리자 권한, 필수 입력과 음수가 아닌 `slot_capacity`를 DB에서 검증한다.
+- `station_inventory` View는 Battery에서 `available_count`, `occupied_slot_count`, `remaining_slot_count`를 계산한다. 점유 상태는 `Charging`, `Available`, `UnderRepair`뿐이며 별도 재고 테이블이나 저장 점유량은 없다.
+- 용량 변경은 `private.lock_station_capacity`로 Station 행을 `FOR UPDATE` 잠근 뒤 점유량을 다시 계산하며, 현재 점유량보다 작은 용량을 거부한다.
+- 이후 Battery 등록·반납·재배치 Transaction은 점유량을 늘리기 전에 같은 잠금 함수를 호출해야 한다. 이 규칙을 따르지 않는 직접 Station `INSERT`/`UPDATE`는 인증 사용자에게 허용하지 않는다.
+- 관리 화면은 현재 Supabase Auth 세션과 연결된 `app_users` 관리자 프로필을 확인하지만, 최종 권한 판단은 RPC의 DB 관리자 검사에서 수행한다.
+
+## B1-B Battery 등록·재배치
+
+- `admin_register_battery`는 관리자 권한과 입력값을 검사하고, B1-A Station 잠금 함수로 목적지 점유량 증가 1을 예약한 뒤 Battery와 최초 History를 한 Transaction에서 생성한다.
+- 등록 Battery는 `Charging`, 충전량·사용 횟수 0으로 시작한다. `charge_started_at`과 History 시각을 동일하게 기록하며 B0-C Trigger가 충전 Clock 기준 시각과 현재 배율을 초기화한다.
+- `admin_relocate_battery`는 Battery를 `FOR UPDATE`로 잠그고 실제 출발지를 검사한다. 출발·도착 Station은 UUID 순서로 잠그며 도착지 수용량을 다시 검사한다.
+- 재배치는 `Charging`, `Available`, `UnderRepair`만 허용한다. `station_id`와 같은 상태의 `Relocation` History만 변경하고 상태, 충전량, 사용 횟수와 충전 Clock은 보존한다.
+- `admin_list_batteries`는 관리자 UI에 필요한 Battery·Station·충전 Clock 정보를 반환한다. 인증 사용자의 직접 Battery `INSERT`/`UPDATE`는 차단한다.
+- 화면의 상태 필터는 공통 `canTransitionBatteryStatus(..., { relocation: true })`를 재사용하지만, 최종 권한·상태·수용량 검사는 DB RPC가 수행한다.
 
 ## 재학증명서 Storage
 
@@ -103,7 +120,7 @@ FK 삭제 동작은 `RESTRICT`이며 조회용 인덱스가 포함된다. B0-B M
 
 | 블록 | 원자적 처리 기준 |
 | --- | --- |
-| B1 | 관리자 권한 확인, Battery/Station 잠금, 등록 또는 재배치, 수용량 검사, History 기록 |
+| B1 | Station 등록·수정과 Battery 등록·재배치를 관리자 RPC로 구현했다. Station/Battery 잠금, 수용량 검사와 History 기록을 한 Transaction에서 처리한다. |
 | B3 | 사용자 자격·정지·활성 대여 검사, User/Battery 잠금, Rental 생성, `Available -> Rented`, History 기록 |
 | B4 | Rental/Battery/Station 잠금, 미반납·수용량 검사, 반납 필드와 `used_count`, `Charging` 전이·충전 Clock, History 기록 |
 | B5/B6 | Battery와 관련 Rental 잠금, 공통 상태 전이·확률 Gate 검사, 충전·수리·연체·분실·폐기 필드와 History 기록 |
@@ -118,6 +135,6 @@ FK 삭제 동작은 `RESTRICT`이며 조회용 인덱스가 포함된다. B0-B M
 ## 이후 확장 범위
 
 - B2: 실제 회원가입·승인·로그인 UI와 비밀번호 변경 업무
-- B1~B6: 위 계약에 따른 실제 업무 RPC와 화면
+- B3~B6: 위 계약에 따른 실제 업무 RPC와 화면
 
 확장 시 기존 Schema, 상태 전이, 공통 API 계약을 변경하려면 관련 코드·테스트·이 문서를 함께 갱신한다.

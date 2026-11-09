@@ -272,17 +272,14 @@ select results_eq(
   array[0],
   'a user cannot grant themselves administrator or eligibility values'
 );
-select results_eq(
+select throws_ok(
   $$
-    with changed as (
-      update public.batteries
-      set status = 'Disposed'
-      where battery_id = '00000000-0000-0000-0000-000000000601'
-      returning 1
-    )
-    select count(*)::integer from changed
+    update public.batteries
+    set status = 'Disposed'
+    where battery_id = '00000000-0000-0000-0000-000000000601'
   $$,
-  array[0],
+  '42501',
+  null,
   'a user cannot modify batteries'
 );
 select is(
@@ -384,15 +381,15 @@ select is(
 select results_eq(
   $$
     with changed as (
-      update public.batteries
-      set current_charge = 90
-      where battery_id = '00000000-0000-0000-0000-000000000601'
+      update public.app_users
+      set user_name = user_name
+      where user_id = '20260001'
       returning 1
     )
     select count(*)::integer from changed
   $$,
   array[1],
-  'an administrator passes the database-level write check'
+  'an administrator passes the database-level app user write check'
 );
 select is(
   (

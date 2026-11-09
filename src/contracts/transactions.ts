@@ -38,11 +38,11 @@ export interface TransactionReceipt {
 }
 
 export interface RegisterBatteryInput {
+  readonly batteryId: string
   readonly modelName: string
   readonly capacity: number
   readonly cycleLife: number
   readonly stationId: string
-  readonly initialCharge: number
 }
 
 export interface RegisterBatteryOutput {
@@ -52,8 +52,8 @@ export interface RegisterBatteryOutput {
 
 export interface RelocateBatteryInput {
   readonly batteryId: string
+  readonly originStationId: string
   readonly destinationStationId: string
-  readonly reason: string
 }
 
 export interface RelocateBatteryOutput {
@@ -119,7 +119,7 @@ export const TRANSACTION_CONTRACTS = {
     locks: ["destination station FOR UPDATE"],
     validations: [
       "station exists and has capacity",
-      "initial charge is between 0 and 100",
+      "battery ID is unique and numeric fields are valid",
       "initial transition is NULL -> Charging",
     ],
     atomicWrites: ["battery insert", "initial status history insert"],
@@ -138,6 +138,8 @@ export const TRANSACTION_CONTRACTS = {
       "origin and destination stations FOR UPDATE in stable ID order",
     ],
     validations: [
+      "battery is currently assigned to the supplied origin station",
+      "origin and destination stations are different",
       "same-state relocation is limited to slot-occupying statuses",
       "destination station has capacity",
     ],
