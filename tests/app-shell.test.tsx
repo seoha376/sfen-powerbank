@@ -10,7 +10,7 @@ describe("application shell", () => {
     expect(
       screen.getByRole("heading", { name: /SFEN Power Bank/i }),
     ).toBeInTheDocument()
-    expect(screen.getByText(/B1-A Station Management/i)).toBeInTheDocument()
+    expect(screen.getByText(/B1 Station & Battery Management/i)).toBeInTheDocument()
     expect(screen.queryByRole("button")).not.toBeInTheDocument()
   })
 })

@@ -33,6 +33,22 @@ describe("shared transaction contracts", () => {
     expect(canTransitionBatteryStatus("Disposed", "Charging")).toBe(false)
   })
 
+  it("captures the B1 registration and relocation invariants", () => {
+    expect(TRANSACTION_CONTRACTS.registerBattery.validations).toContain(
+      "initial transition is NULL -> Charging",
+    )
+    expect(TRANSACTION_CONTRACTS.relocateBattery.locks).toContain(
+      "battery FOR UPDATE",
+    )
+    expect(TRANSACTION_CONTRACTS.relocateBattery.validations).toEqual(
+      expect.arrayContaining([
+        "battery is currently assigned to the supplied origin station",
+        "origin and destination stations are different",
+        "destination station has capacity",
+      ]),
+    )
+  })
+
   it("requires concurrency errors for multi-row rental operations", () => {
     expect(TRANSACTION_CONTRACTS.startRental.errors).toContain(
       "CONCURRENT_MODIFICATION",

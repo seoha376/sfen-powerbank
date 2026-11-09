@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   listStations: vi.fn(),
   createStation: vi.fn(),
   updateStation: vi.fn(),
+  listBatteries: vi.fn(),
+  registerBattery: vi.fn(),
+  relocateBattery: vi.fn(),
 }))
 
 vi.mock("@/auth/student-auth", () => ({
@@ -19,6 +22,12 @@ vi.mock("@/features/stations/station-service", () => ({
   listStations: mocks.listStations,
   createStation: mocks.createStation,
   updateStation: mocks.updateStation,
+}))
+
+vi.mock("@/features/batteries/battery-service", () => ({
+  listBatteries: mocks.listBatteries,
+  registerBattery: mocks.registerBattery,
+  relocateBattery: mocks.relocateBattery,
 }))
 
 const adminProfile = {
@@ -55,6 +64,7 @@ describe("station management", () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mocks.getCurrentAppUser.mockResolvedValue(adminProfile)
+    mocks.listBatteries.mockResolvedValue([])
   })
 
   it("registers a station and displays its computed counts", async () => {
@@ -172,7 +182,7 @@ describe("station management", () => {
 
     expect(
       await screen.findByText(
-        "Station 목록을 불러오지 못했습니다: inventory view unavailable",
+        "관리 데이터를 불러오지 못했습니다: inventory view unavailable",
       ),
     ).toBeInTheDocument()
     expect(screen.getByRole("form", { name: "Station 등록" })).toBeInTheDocument()

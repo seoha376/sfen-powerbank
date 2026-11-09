@@ -11,6 +11,11 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import {
+  listBatteries,
+  type BatteryOverview,
+} from "@/features/batteries/battery-service"
+import { BatteryManagement } from "@/features/batteries/battery-management"
+import {
   createStation,
   listStations,
   updateStation,
@@ -166,6 +171,7 @@ function StationEditor({
 export function StationManagementPage() {
   const [access, setAccess] = useState<"loading" | "allowed" | "unauthenticated" | "forbidden">("loading")
   const [stations, setStations] = useState<StationOverview[]>([])
+  const [batteries, setBatteries] = useState<BatteryOverview[]>([])
   const [draft, setDraft] = useState(emptyDraft)
   const [error, setError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -183,8 +189,14 @@ export function StationManagementPage() {
         }
         setAccess("allowed")
         try {
-          const data = await listStations()
-          if (active) setStations(data)
+          const [stationData, batteryData] = await Promise.all([
+            listStations(),
+            listBatteries(),
+          ])
+          if (active) {
+            setStations(stationData)
+            setBatteries(batteryData)
+          }
         } catch (caught) {
           if (active) setLoadError(errorMessage(caught))
         }
@@ -213,6 +225,20 @@ export function StationManagementPage() {
     }
   }
 
+  async function refreshInventory() {
+    setLoadError(null)
+    try {
+      const [stationData, batteryData] = await Promise.all([
+        listStations(),
+        listBatteries(),
+      ])
+      setStations(stationData)
+      setBatteries(batteryData)
+    } catch (caught) {
+      setLoadError(errorMessage(caught))
+    }
+  }
+
   const accessMessage =
     access === "loading"
       ? "관리자 세션을 확인하고 있습니다."
@@ -224,7 +250,7 @@ export function StationManagementPage() {
     <main className="min-h-svh bg-slate-950 px-4 py-10 text-slate-50 sm:px-6">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
         <header className="space-y-3">
-          <p className="text-sm font-semibold tracking-[0.24em] text-cyan-300 uppercase">B1-A Station Management</p>
+          <p className="text-sm font-semibold tracking-[0.24em] text-cyan-300 uppercase">B1 Station & Battery Management</p>
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">SFEN Power Bank</h1>
           <p className="max-w-2xl text-slate-300">
             Station 수용량은 Battery의 현재 상태에서 계산되며, Available 재고와 슬롯 점유량은 별도로 표시됩니다.
@@ -263,7 +289,7 @@ export function StationManagementPage() {
               </div>
               {loadError ? (
                 <p role="alert" className="rounded-xl border border-rose-300/30 bg-rose-300/5 p-4 text-rose-200">
-                  Station 목록을 불러오지 못했습니다: {loadError}
+                  관리 데이터를 불러오지 못했습니다: {loadError}
                 </p>
               ) : stations.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-white/15 p-8 text-center text-slate-400">등록된 Station이 없습니다.</p>
@@ -277,6 +303,12 @@ export function StationManagementPage() {
                 ))
               )}
             </section>
+
+            <BatteryManagement
+              stations={stations}
+              batteries={batteries}
+              onRefresh={refreshInventory}
+            />
           </>
         )}
       </div>
